@@ -24,7 +24,7 @@ module.exports = {
     },
     globalObject: 'this',
     path: outputPath,
-    publicPath: 'auto',
+    publicPath: '/',
     clean: true,
   },
   devtool: 'source-map',

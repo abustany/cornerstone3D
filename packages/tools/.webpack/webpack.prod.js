@@ -14,6 +14,7 @@ module.exports = (env, argv) => {
     },
     output: {
       path: path.join(__dirname, '../dist/umd'),
+      publicPath: '/',
       library: 'cornerstoneTools3D',
       libraryTarget: 'umd',
       filename: 'index.js',
