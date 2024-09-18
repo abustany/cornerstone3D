@@ -32,6 +32,7 @@ const webWorkers: {
   worker: Worker;
   status: 'ready' | 'busy' | 'initializing';
   task?: WorkerTask;
+  readySince?: Date;
 }[] = [];
 
 // The options for cornerstoneDICOMImageLoader
@@ -117,6 +118,7 @@ function handleMessageFromWorker(msg: MessageEvent<WebWorkerResponse>) {
   // console.log('handleMessageFromWorker', msg.data);
   if (msg.data.taskType === 'initialize') {
     webWorkers[msg.data.workerIndex].status = 'ready';
+    webWorkers[msg.data.workerIndex].readySince = new Date();
     startTaskOnWebWorker();
   } else {
     const start = webWorkers[msg.data.workerIndex].task.start;
@@ -134,6 +136,7 @@ function handleMessageFromWorker(msg: MessageEvent<WebWorkerResponse>) {
 
     statistics.numTasksExecuting--;
     webWorkers[msg.data.workerIndex].status = 'ready';
+    webWorkers[msg.data.workerIndex].readySince = new Date();
     statistics.numTasksCompleted++;
 
     const end = new Date().getTime();
