@@ -6,7 +6,7 @@ import getNumberValues from './getNumberValues';
 function isNMModality(metaData) {
   const modality = getValue(metaData['00080060']);
 
-  return modality.includes('NM');
+  return !!(modality?.includes('NM'));
 }
 
 /**
