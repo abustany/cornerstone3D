@@ -73,6 +73,7 @@ import getViewportImageIds from './getViewportImageIds';
 import { getRandomSampleFromArray } from './getRandomSampleFromArray';
 import { getVolumeId } from './getVolumeId';
 import { hasFloatScalingParameters } from './hasFloatScalingParameters';
+import { rescaleVOIRange } from './rescaleVOIRange';
 
 // name spaces
 import * as planar from './planar';
@@ -168,4 +169,5 @@ export {
   getVolumeId,
   color,
   hasFloatScalingParameters,
+  rescaleVOIRange,
 };

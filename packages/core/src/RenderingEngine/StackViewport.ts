@@ -54,6 +54,7 @@ import {
   triggerEvent,
   updateVTKImageDataWithCornerstoneImage,
   windowLevel as windowLevelUtil,
+  rescaleVOIRange,
 } from '../utilities';
 import Viewport from './Viewport';
 import { getColormap } from './helpers/cpuFallback/colors/index';
@@ -1418,13 +1419,33 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
     const isSigmoidTFun =
       this.VOILUTFunction === VOILUTFunctionType.SAMPLED_SIGMOID;
 
+    // Rescaling can get disabled during image decoding if the target device does
+    // not support rendering floats (eg. iOS). In those cases, the transfer function
+    // should be computed from unscaled values.
+    //
+    // The rest of the code should still see the "regular" VOI range, unscaling the
+    // range when computing the transfer function is purely a rendering concern.
+    const transferFunctionUsesUnscaledValues =
+      this.csImage?.preScale?.enabled === true &&
+      this.csImage?.preScale?.scaled === false;
+    const transferFunctionVOIRange = transferFunctionUsesUnscaledValues
+      ? rescaleVOIRange(voiRangeToUse, {
+          rescaleSlope:
+            1 / (this.csImage?.preScale?.scalingParameters?.rescaleSlope ?? 1),
+          rescaleIntercept: -(
+            (this.csImage?.preScale?.scalingParameters?.rescaleIntercept ?? 0) /
+            (this.csImage?.preScale?.scalingParameters?.rescaleSlope ?? 1)
+          ),
+        })
+      : voiRangeToUse;
+
     // use the old cfun if it exists for linear case
     if (isSigmoidTFun || !transferFunction || forceRecreateLUTFunction) {
       const transferFunctionCreator = isSigmoidTFun
         ? createSigmoidRGBTransferFunction
         : createLinearRGBTransferFunction;
 
-      transferFunction = transferFunctionCreator(voiRangeToUse);
+      transferFunction = transferFunctionCreator(transferFunctionVOIRange);
 
       if (this.invert) {
         invertRgbTransferFunction(transferFunction);
@@ -1437,7 +1458,10 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
 
     if (!isSigmoidTFun) {
       // @ts-ignore vtk type error
-      transferFunction.setRange(voiRangeToUse.lower, voiRangeToUse.upper);
+      transferFunction.setRange(
+        transferFunctionVOIRange.lower,
+        transferFunctionVOIRange.upper
+      );
     }
 
     this.voiRange = voiRangeToUse;
