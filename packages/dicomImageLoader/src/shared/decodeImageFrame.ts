@@ -287,6 +287,7 @@ function postProcessDecodedPixels(
     }
   } else if (disableScale) {
     imageFrame.preScale = {
+      ...options.preScale,
       scaled: false,
     };
 
