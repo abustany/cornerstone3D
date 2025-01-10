@@ -331,6 +331,7 @@ function createImage(
         voiLUTFunction: voiLutModule.voiLUTFunction
           ? voiLutModule.voiLUTFunction
           : undefined,
+        voiLUTSequence: voiLutModule.voiLUTSequence,
         decodeTimeInMS: imageFrame.decodeTimeInMS,
         floatPixelData: undefined,
         imageFrame,

@@ -50,6 +50,8 @@ interface IImage {
   windowWidth: number[] | number;
   /** voiLUTFunction from metadata */
   voiLUTFunction: string;
+  /** VOI LUT tables */
+  voiLUTSequence?: LutType[];
   /** function that returns the pixelData as an array */
   getPixelData: () => PixelDataTypedArray;
   getCanvas: () => HTMLCanvasElement;
