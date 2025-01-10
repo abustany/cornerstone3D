@@ -26,6 +26,7 @@ import type {
   IStackInput,
   IStackViewport,
   ImageLoadListener,
+  LutType,
   Mat3,
   PTScaling,
   Point2,
@@ -156,7 +157,7 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
   >();
 
   private colormap: ColormapPublic | CPUFallbackColormapData;
-  private voiRange: VOIRange;
+  private voi: VOIRange | LutType | null;
   private voiUpdatedWithSetProperties = false;
   private VOILUTFunction: VOILUTFunctionType;
   //
@@ -388,7 +389,7 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
    */
   public removeAllActors: () => void;
 
-  private setVOI: (voiRange: VOIRange, options?: SetVOIOptions) => void;
+  private setVOI: (voi: VOIRange | LutType, options?: SetVOIOptions) => void;
 
   protected setInterpolationType: (
     interpolationType: InterpolationType
@@ -782,7 +783,6 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
   public getProperties = (): StackViewportProperties => {
     const {
       colormap,
-      voiRange,
       VOILUTFunction,
       interpolationType,
       invert,
@@ -792,7 +792,7 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
 
     return {
       colormap,
-      voiRange,
+      voiRange: this.getVOIRange(),
       VOILUTFunction,
       interpolationType,
       invert,
@@ -905,23 +905,23 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
   private _setPropertiesFromCache(): void {
     const { interpolationType, invert } = this;
 
-    let voiRange;
+    let voi: VOIRange | LutType;
     if (this.voiUpdatedWithSetProperties) {
       // use the cached voiRange if the voiRange is locked (if the user has
       // manually set the voi with tools or setProperties api)
-      voiRange = this.voiRange;
+      voi = this.voi;
     } else if (this._isCurrentImagePTPrescaled()) {
       // if not set via setProperties; if it is a PT image and is already prescaled,
       // use the default range for PT
-      voiRange = this._getDefaultPTPrescaledVOIRange();
+      voi = this._getDefaultPTPrescaledVOIRange();
     } else {
       // if not set via setProperties; if it is not a PT image or is not prescaled,
       // use the voiRange for the current image from its metadata if found
       // otherwise, use the cached voiRange
-      voiRange = this._getVOIRangeForCurrentImage() ?? this.voiRange;
+      voi = this._getVOIRangeForCurrentImage() ?? this.voi;
     }
 
-    this.setVOI(voiRange);
+    this.setVOI(voi);
     this.setInterpolationType(interpolationType);
     this.setInvertColor(invert);
   }
@@ -1347,7 +1347,7 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
       viewport.voi.windowCenter = windowCenter;
     }
 
-    this.voiRange = voiRange;
+    this.voi = voiRange;
     const eventDetail: VoiModifiedEventDetail = {
       viewportId: this.id,
       range: voiRange,
@@ -1373,7 +1373,26 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
     return imageActor.getProperty().getRGBTransferFunction(0);
   }
 
-  private setVOIGPU(voiRange: VOIRange, options: SetVOIOptions = {}): void {
+  private getVOIRange(): VOIRange | null {
+    if (!this.voi) {
+      return null;
+    }
+    if (isVOIRange(this.voi)) {
+      return this.voi;
+    }
+    if (isLutType(this.voi)) {
+      return {
+        lower: this.voi.firstValueMapped,
+        upper: this.voi.firstValueMapped + this.voi.lut.length - 1,
+      };
+    }
+    throw new Error('no VOI defined');
+  }
+
+  private setVOIGPU(
+    voi: VOIRange | LutType,
+    options: SetVOIOptions = {}
+  ): void {
     const {
       suppressEvents = false,
       forceRecreateLUTFunction = false,
@@ -1381,10 +1400,9 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
     } = options;
 
     if (
-      voiRange &&
-      this.voiRange &&
-      this.voiRange.lower === voiRange.lower &&
-      this.voiRange.upper === voiRange.upper &&
+      voi &&
+      this.voi &&
+      voiEqual(voi, this.voi) &&
       !forceRecreateLUTFunction &&
       !this.stackInvalidated
     ) {
@@ -1401,70 +1419,103 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
     }
     const imageActor = defaultActor.actor as ImageActor;
 
-    let voiRangeToUse = voiRange;
+    let voiToUse = voi;
 
-    if (typeof voiRangeToUse === 'undefined') {
+    if (typeof voiToUse === 'undefined') {
       const imageData = imageActor.getMapper().getInputData();
       const range = imageData.getPointData().getScalars().getRange();
       const maxVoiRange = { lower: range[0], upper: range[1] };
-      voiRangeToUse = maxVoiRange;
+      voiToUse = maxVoiRange;
     }
 
     // scaling logic here
     // https://github.com/Kitware/vtk-js/blob/master/Sources/Rendering/OpenGL/ImageMapper/index.js#L540-L549
     imageActor.getProperty().setUseLookupTableScalarRange(true);
 
-    let transferFunction = imageActor.getProperty().getRGBTransferFunction(0);
+    if (isVOIRange(voiToUse)) {
+      let transferFunction = imageActor.getProperty().getRGBTransferFunction(0);
 
-    const isSigmoidTFun =
-      this.VOILUTFunction === VOILUTFunctionType.SAMPLED_SIGMOID;
+      const isSigmoidTFun =
+        this.VOILUTFunction === VOILUTFunctionType.SAMPLED_SIGMOID;
 
-    // Rescaling can get disabled during image decoding if the target device does
-    // not support rendering floats (eg. iOS). In those cases, the transfer function
-    // should be computed from unscaled values.
-    //
-    // The rest of the code should still see the "regular" VOI range, unscaling the
-    // range when computing the transfer function is purely a rendering concern.
-    const transferFunctionUsesUnscaledValues =
-      this.csImage?.preScale?.enabled === true &&
-      this.csImage?.preScale?.scaled === false;
-    const transferFunctionVOIRange = transferFunctionUsesUnscaledValues
-      ? rescaleVOIRange(voiRangeToUse, {
-          rescaleSlope:
-            1 / (this.csImage?.preScale?.scalingParameters?.rescaleSlope ?? 1),
-          rescaleIntercept: -(
-            (this.csImage?.preScale?.scalingParameters?.rescaleIntercept ?? 0) /
-            (this.csImage?.preScale?.scalingParameters?.rescaleSlope ?? 1)
-          ),
-        })
-      : voiRangeToUse;
+      // Rescaling can get disabled during image decoding if the target device does
+      // not support rendering floats (eg. iOS). In those cases, the transfer function
+      // should be computed from unscaled values.
+      //
+      // The rest of the code should still see the "regular" VOI range, unscaling the
+      // range when computing the transfer function is purely a rendering concern.
+      const transferFunctionUsesUnscaledValues =
+        this.csImage?.preScale?.enabled === true &&
+        this.csImage?.preScale?.scaled === false;
+      const transferFunctionVOIRange = transferFunctionUsesUnscaledValues
+        ? rescaleVOIRange(voiToUse, {
+            rescaleSlope:
+              1 /
+              (this.csImage?.preScale?.scalingParameters?.rescaleSlope ?? 1),
+            rescaleIntercept: -(
+              (this.csImage?.preScale?.scalingParameters?.rescaleIntercept ??
+                0) /
+              (this.csImage?.preScale?.scalingParameters?.rescaleSlope ?? 1)
+            ),
+          })
+        : voiToUse;
 
-    // use the old cfun if it exists for linear case
-    if (isSigmoidTFun || !transferFunction || forceRecreateLUTFunction) {
-      const transferFunctionCreator = isSigmoidTFun
-        ? createSigmoidRGBTransferFunction
-        : createLinearRGBTransferFunction;
+      // use the old cfun if it exists for linear case
+      if (isSigmoidTFun || !transferFunction || forceRecreateLUTFunction) {
+        const transferFunctionCreator = isSigmoidTFun
+          ? createSigmoidRGBTransferFunction
+          : createLinearRGBTransferFunction;
 
-      transferFunction = transferFunctionCreator(transferFunctionVOIRange);
+        transferFunction = transferFunctionCreator(transferFunctionVOIRange);
+
+        if (this.invert) {
+          invertRgbTransferFunction(transferFunction);
+        }
+
+        imageActor.getProperty().setRGBTransferFunction(0, transferFunction);
+        this.initialTransferFunctionNodes =
+          getTransferFunctionNodes(transferFunction);
+      }
+
+      if (!isSigmoidTFun) {
+        // @ts-ignore vtk type error
+        transferFunction.setRange(
+          transferFunctionVOIRange.lower,
+          transferFunctionVOIRange.upper
+        );
+      }
+    } else if (isLutType(voiToUse)) {
+      // FIXME: handle applying LUT to unscaled values for iOS
+      // FIXME: handle signed values
+      const maxValue = 1 << voiToUse.numBitsPerEntry;
+      const functionData: number[] = [];
+
+      for (const y of voiToUse.lut) {
+        const val = y / maxValue; // scale to 0.0-1.0
+        functionData.push(val, val, val); // RGB
+      }
+
+      const transferFunction = vtkColorTransferFunction.newInstance();
+      const minX = voiToUse.firstValueMapped;
+      const maxX = voiToUse.firstValueMapped + voiToUse.lut.length - 1;
+      transferFunction.buildFunctionFromTable(
+        minX,
+        maxX,
+        voiToUse.lut.length,
+        functionData
+      );
 
       if (this.invert) {
         invertRgbTransferFunction(transferFunction);
       }
 
       imageActor.getProperty().setRGBTransferFunction(0, transferFunction);
-      this.initialTransferFunctionNodes =
-        getTransferFunctionNodes(transferFunction);
+      // not sure what initialTransferFunctionNodes is for, ignoring it here
+    } else {
+      throw new Error('unexpected voi type');
     }
 
-    if (!isSigmoidTFun) {
-      // @ts-ignore vtk type error
-      transferFunction.setRange(
-        transferFunctionVOIRange.lower,
-        transferFunctionVOIRange.upper
-      );
-    }
-
-    this.voiRange = voiRangeToUse;
+    this.voi = voiToUse;
 
     // if voiRange is set by setProperties we need to lock it if it is not locked already
     if (!this.voiUpdatedWithSetProperties) {
@@ -1477,7 +1528,7 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
 
     const eventDetail: VoiModifiedEventDetail = {
       viewportId: this.id,
-      range: voiRangeToUse,
+      range: this.getVOIRange(),
       VOILUTFunction: this.VOILUTFunction,
     };
 
@@ -1756,7 +1807,7 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
     this.stackInvalidated = true;
     this.flipVertical = false;
     this.flipHorizontal = false;
-    this.voiRange = null;
+    this.voi = null;
     this.interpolationType = InterpolationType.LINEAR;
     this.invert = false;
     this.viewportStatus = ViewportStatus.LOADING;
@@ -2211,7 +2262,7 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
     );
 
     const { windowCenter, windowWidth } = viewport.voi;
-    this.voiRange = windowLevelUtil.toLowHighRange(windowWidth, windowCenter);
+    this.voi = windowLevelUtil.toLowHighRange(windowWidth, windowCenter);
 
     this._cpuFallbackEnabledElement.image = image;
     this._cpuFallbackEnabledElement.metadata = {
@@ -2422,7 +2473,7 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
     // invalidate the stack so that we can set the voi range
     this.stackInvalidated = true;
 
-    this.setVOI(this._getInitialVOIRange(image), {
+    this.setVOI(this._getInitialVOI(image), {
       forceRecreateLUTFunction: !!monochrome1,
     });
 
@@ -2442,10 +2493,15 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
     }
   }
 
-  private _getInitialVOIRange(image: IImage) {
-    if (this.voiRange && this.voiUpdatedWithSetProperties) {
+  private _getInitialVOI(image: IImage) {
+    if (this.voi && this.voiUpdatedWithSetProperties) {
       return this.globalDefaultProperties.voiRange;
     }
+
+    if (image.voiLUTSequence?.length > 0) {
+      return image.voiLUTSequence[0];
+    }
+
     const { windowCenter, windowWidth } = image;
 
     let voiRange = this._getVOIRangeFromWindowLevel(windowWidth, windowCenter);
@@ -3144,6 +3200,11 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
   }
 
   private setColormapGPU(colormap: ColormapPublic) {
+    // FIXME: we'd probably need to compute the range on the LUT values here.
+    if (!isVOIRange(this.voi)) {
+      return;
+    }
+
     const ActorEntry = this.getDefaultActor();
     const actor = ActorEntry.actor as ImageActor;
     const actorProp = actor.getProperty();
@@ -3156,14 +3217,11 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
     if (!rgbTransferFunction) {
       const cfun = vtkColorTransferFunction.newInstance();
       cfun.applyColorMap(colormapObj);
-      cfun.setMappingRange(this.voiRange.lower, this.voiRange.upper);
+      cfun.setMappingRange(this.voi.lower, this.voi.upper);
       actorProp.setRGBTransferFunction(0, cfun);
     } else {
       rgbTransferFunction.applyColorMap(colormapObj);
-      rgbTransferFunction.setMappingRange(
-        this.voiRange.lower,
-        this.voiRange.upper
-      );
+      rgbTransferFunction.setMappingRange(this.voi.lower, this.voi.upper);
       actorProp.setRGBTransferFunction(0, rgbTransferFunction);
     }
 
@@ -3328,6 +3386,42 @@ class StackViewport extends Viewport implements IStackViewport, IImagesLoader {
       gpu: this.unsetColormapGPU,
     },
   };
+}
+
+function isVOIRange(x: VOIRange | LutType): x is VOIRange {
+  return 'lower' in x;
+}
+
+function isLutType(x: VOIRange | LutType): x is LutType {
+  return 'lut' in x;
+}
+
+function voiEqual(a: VOIRange | LutType, b: VOIRange | LutType): boolean {
+  return (
+    (isVOIRange(a) &&
+      isVOIRange(b) &&
+      a.lower === b.lower &&
+      a.upper === b.upper) ||
+    (isLutType(a) &&
+      isLutType(b) &&
+      a.firstValueMapped === b.firstValueMapped &&
+      a.numBitsPerEntry === b.numBitsPerEntry &&
+      arrayEqual(a.lut, b.lut))
+  );
+}
+
+function arrayEqual<T>(a: T[], b: T[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  for (let i = 0; i < a.length; ++i) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export default StackViewport;
