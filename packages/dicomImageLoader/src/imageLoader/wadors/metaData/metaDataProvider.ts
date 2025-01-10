@@ -2,6 +2,8 @@ import external from '../../../externalModules';
 import getNumberValues from './getNumberValues';
 import getNumberValue from './getNumberValue';
 import getOverlayPlaneModule from './getOverlayPlaneModule';
+import getModalityLUTOutputPixelRepresentation from './getModalityLUTOutputPixelRepresentation';
+import getLUTs from './getLUTs';
 import metaDataManager from '../metaDataManager';
 import getValue from './getValue';
 import {
@@ -248,10 +250,17 @@ function metaDataProvider(type, imageId) {
   }
 
   if (type === MetadataModules.VOI_LUT) {
+    const modalityLUTOutputPixelRepresentation =
+      getModalityLUTOutputPixelRepresentation(metaData);
+
     return {
       // TODO VOT LUT Sequence
       windowCenter: getNumberValues(metaData['00281050'], 1),
       windowWidth: getNumberValues(metaData['00281051'], 1),
+      voiLUTSequence: getLUTs(
+        modalityLUTOutputPixelRepresentation,
+        metaData['00283010']
+      ),
     };
   }
 
