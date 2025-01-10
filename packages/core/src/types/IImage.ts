@@ -6,6 +6,7 @@ import type VoxelManager from '../utilities/VoxelManager';
 import { ImageQualityStatus } from '../enums';
 import IImageCalibration from './IImageCalibration';
 import RGB from './RGB';
+import LutType from './LutType';
 
 /**
  * Cornerstone Image interface, it is used for both CPU and GPU rendering

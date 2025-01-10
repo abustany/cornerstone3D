@@ -133,6 +133,7 @@ import type BoundsLPS from './BoundsLPS';
 // Sometimes the type is needed rather than the class, so import
 // the type only here.
 import type PointsManager from '../utilities/PointsManager';
+import type LutType from './LutType';
 
 export type {
   // config
@@ -157,6 +158,7 @@ export type {
   Scaling,
   IStreamingImageVolume,
   IImage,
+  LutType,
   IImageData,
   IImageCalibration,
   CPUIImageData,

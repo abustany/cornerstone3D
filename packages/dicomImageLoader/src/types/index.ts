@@ -10,7 +10,7 @@ import { LoaderOptions } from './LoaderOptions';
 import { LoaderDecodeOptions } from './LoaderDecodeOptions';
 import { DICOMLoaderIImage } from './DICOMLoaderIImage';
 import { DICOMLoaderImageOptions } from './DICOMLoaderImageOptions';
-import { LutType } from './LutType';
+import { Types } from '@cornerstonejs/core';
 import { LoadRequestFunction } from './LoadRequestFunction';
 import { DICOMLoaderDataSetWithFetchMore } from './DICOMLoaderDataSetWithFetchMore';
 import {
@@ -39,6 +39,8 @@ import {
   WebWorkerResponse,
   WebWorkerDeferredObject,
 } from './WebWorkerTypes';
+
+type LutType = Types.LutType
 
 export {
   ImageFrame,

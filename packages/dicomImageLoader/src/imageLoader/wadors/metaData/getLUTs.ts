@@ -1,4 +1,5 @@
-import { LutType, WADORSMetaData, WADORSMetaDataElement } from '../../../types';
+import { Types } from '@cornerstonejs/core';
+import { WADORSMetaData, WADORSMetaDataElement } from '../../../types';
 import getNumberValues from './getNumberValues';
 import getSequenceItems from './getSequenceItems';
 
@@ -14,7 +15,7 @@ function decodeBase64(base64String: string): ArrayBuffer {
     return buffer;
 }
 
-function getLUT(pixelRepresentation: number, md: WADORSMetaData): LutType {
+function getLUT(pixelRepresentation: number, md: WADORSMetaData): Types.LutType {
   let [numLUTEntries, firstValueMapped, numBitsPerEntry] = getNumberValues(md["00283002"], 3)
 
   if (numLUTEntries === 0) {
@@ -44,7 +45,7 @@ function getLUT(pixelRepresentation: number, md: WADORSMetaData): LutType {
   return lut
 }
 
-function getLUTs(pixelRepresentation: number, lutSequence: WADORSMetaDataElement): LutType[] {
+function getLUTs(pixelRepresentation: number, lutSequence: WADORSMetaDataElement): Types.LutType[] {
   return getSequenceItems(lutSequence).map(item => getLUT(pixelRepresentation, item as unknown as WADORSMetaData))
 }
 
